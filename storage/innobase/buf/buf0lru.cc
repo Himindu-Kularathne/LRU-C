@@ -1347,6 +1347,67 @@ buf_LRU_check_size_of_non_data_objects(
 }
 
 /******************************************************************//**
+Try to free a replaceable clean page from the LRU tail. This is a
+conservative fallback for LRU-C when the cached oldest clean page is stale
+or busy.
+@return TRUE if a page was moved to the free list */
+static
+ibool
+buf_LRU_try_free_clean_tail_page(
+/*=============================*/
+	buf_pool_t*	buf_pool,	/*!< in/out: buffer pool instance */
+	ulint		scan_limit)	/*!< in: max LRU-tail pages to scan */
+{
+	ulint		scanned = 0;
+
+	ut_ad(buf_pool_mutex_own(buf_pool));
+
+	for (buf_page_t* bpage = UT_LIST_GET_LAST(buf_pool->LRU);
+	     bpage != NULL && scanned < scan_limit;
+	     bpage = UT_LIST_GET_PREV(LRU, bpage), ++scanned) {
+
+		if (bpage == buf_pool->LRU_old) {
+			break;
+		}
+
+		if (!buf_page_in_file(bpage)) {
+			continue;
+		}
+
+		if (bpage->LRU_batch_write_victim
+		    && !bpage->aio_write_finished) {
+			continue;
+		}
+
+		ib_mutex_t*	block_mutex = buf_page_get_mutex(bpage);
+		ibool		replaceable;
+
+		mutex_enter(block_mutex);
+		replaceable = buf_flush_ready_for_replace(bpage)
+			&& bpage->buf_fix_count == 0
+			&& buf_page_get_io_fix(bpage) == BUF_IO_NONE;
+		mutex_exit(block_mutex);
+
+		if (!replaceable) {
+			continue;
+		}
+
+		if (buf_pool->LRU_oldest_clean_page == bpage) {
+			buf_pool->LRU_oldest_clean_page = NULL;
+		}
+
+		if (buf_LRU_free_page(bpage, false)) {
+			fprintf(stderr,
+				"LRU-C fallback freed clean tail page after scanning %lu pages\n",
+				(ulong) scanned + 1);
+			return(TRUE);
+		}
+	}
+
+	return(FALSE);
+}
+
+/******************************************************************//**
 Returns a free block from the buf_pool. The block is taken off the
 free list. If free list is empty, blocks are moved from the end of the
 LRU list to the free list.
@@ -1414,32 +1475,35 @@ loop:
 	/* lbh */
 	buf_page_t* bpage = NULL;
 
-	if(buf_oldest_clean_page_is_valid(buf_pool)){
+	if (buf_oldest_clean_page_is_valid(buf_pool)) {
 		//fprintf(stderr, "skip lru scan\n");
 		bpage = buf_pool->LRU_oldest_clean_page;
 		freed = buf_LRU_free_page(bpage, false);
-				
-	}else{
+	} else {
 		//fprintf(stderr, "try update ocp\n");
-		if(buf_update_oldest_clean_page(buf_pool, false)){
+		if (buf_update_oldest_clean_page(buf_pool, false)) {
 			bpage = buf_pool->LRU_oldest_clean_page;
 			freed = buf_LRU_free_page(bpage, false);	
-		}else{
+		} else {
 			buf_pool_mutex_exit(buf_pool);					
-			if(buf_update_oldest_clean_page(buf_pool, true)){
+			if (buf_update_oldest_clean_page(buf_pool, true)) {
 				buf_pool_mutex_enter(buf_pool);	
 				//fprintf(stderr, "try lru scan\n");
 				bpage = buf_pool->LRU_oldest_clean_page;
 				freed = buf_LRU_free_page(bpage, false);	
-			}else{
+			} else {
 				buf_pool_mutex_enter(buf_pool);	
 				freed= FALSE;
 			}
-							
 		}
-			
 	}
-	if(freed){
+
+	if (!freed) {
+		freed = buf_LRU_try_free_clean_tail_page(
+			buf_pool, srv_LRU_scan_depth);
+	}
+
+	if (freed) {
 		//fprintf(stderr, "get free block via oldest clean page succeed: old: %lu, bpage:%lu\n", buf_pool->LRU_oldest_clean_page, bpage);		
 		buf_pool_mutex_exit(buf_pool);
 		goto loop;
@@ -2890,5 +2954,3 @@ buf_LRU_print(void)
 }
 #endif /* UNIV_DEBUG_PRINT || UNIV_DEBUG || UNIV_BUF_DEBUG */
 #endif /* !UNIV_HOTBACKUP */
-
-
