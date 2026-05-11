@@ -2008,6 +2008,18 @@ struct buf_pool_t{
 # error "BUF_BUDDY_LOW > UNIV_ZIP_SIZE_MIN"
 #endif
 	/* @} */
+
+	/* lbh: hybrid eviction counters. Placed LAST so all preceding field
+	   offsets are unchanged in precompiled translation units that are not
+	   rebuilt. Written under buf_pool_mutex or LRU_dirty_tail_list_mutex;
+	   read at shutdown without a lock. */
+	ulint		hybrid_candidates_scanned;
+	ulint		hybrid_clean_victims_selected;
+	ulint		hybrid_dirty_pages_flushed;
+	ulint		hybrid_hot_clean_pages_protected;
+	ulint		hybrid_fallback_to_lruc;
+	ulint		hybrid_no_candidate_found;
+	/* end lbh */
 };
 
 /** @name Accessors for buf_pool->mutex.
@@ -2048,7 +2060,27 @@ Use these instead of accessing buf_pool->mutex directly. */
 # define buf_LRU_dirty_tail_list_mutex_exit(b) do {		\
 	mutex_exit(&b->LRU_dirty_tail_list_mutex);		\
 } while (0)
+
+/* lbh: hybrid eviction tuning constants */
+/** Number of LRU-tail pages scanned to find the best hybrid victim. */
+#define HYBRID_SCAN_WINDOW		64
+/** A page whose first-access timestamp is within this many milliseconds of
+    now is considered "recently first-accessed" and penalised in scoring.
+    Uses buf_page_t::access_time which records the FIRST access (ms). */
+#define HYBRID_RECENT_MS		2000
 /* end */
+
+/******************************************************************//**
+Scan up to scan_limit pages from the LRU tail and return the page with the
+highest hybrid eviction score (clean, old, infrequently accessed).
+Called with buf_pool->mutex held.
+@return best victim page, or NULL if none found */
+UNIV_INTERN
+buf_page_t*
+buf_LRU_find_hybrid_victim(
+/*=======================*/
+	buf_pool_t*	buf_pool,	/*!< in/out: buffer pool instance */
+	ulint		scan_limit);	/*!< in: max pages to scan */
 
 
 /** Test if block->mutex is owned. */

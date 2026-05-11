@@ -33,6 +33,7 @@ Created 11/5/1995 Heikki Tuuri
 #include "ut0byte.h"
 #include "ut0lst.h"
 #include "ut0rnd.h"
+#include "ut0ut.h"
 #include "sync0sync.h"
 #include "sync0rw.h"
 #include "hash0hash.h"
@@ -1372,6 +1373,124 @@ we put it to free list to be used.
 * iteration > 1:
   * same as iteration 1 but sleep 100ms
 @return	the free control block, in state BUF_BLOCK_READY_FOR_USE */
+
+/* lbh: hybrid victim selection helpers */
+
+/******************************************************************//**
+Compute a hybrid eviction score for bpage.  Higher score = better victim.
+Must be called with block_mutex or buf_pool_mutex held (heuristic reads).
+Dirty pages return a negative base score; clean, old, cold pages score high.
+@return signed score */
+static lint
+buf_hybrid_page_score(
+/*==================*/
+	const buf_page_t*	bpage,		/*!< in: candidate page */
+	ulint			now_ms)		/*!< in: current time in ms */
+{
+	lint score = 0;
+
+	/* Clean pages strongly preferred over dirty */
+	if (bpage->oldest_modification == 0) {
+		score += 100;
+	} else {
+		score -= 60;
+	}
+
+	/* Pages in the "old" section of the LRU are better candidates */
+	if (bpage->old) {
+		score += 50;
+	}
+
+	/* Use access_time (first-access ms timestamp) as a cold/hot signal.
+	   access_time == 0 means never accessed — very cold.
+	   A non-zero value means the page was accessed at some point; if that
+	   first access was long ago, the page may have cooled.  Note: this is
+	   the FIRST access, not the most recent, so we apply a mild penalty
+	   for recent first-access (likely still in an active scan) and a
+	   small bonus for old first-access (likely cooled since then).
+	   The LRU tail position already gives strong recency protection, so
+	   this signal is secondary. */
+	if (bpage->access_time == 0) {
+		score += 30;	/* never accessed = cold */
+	} else {
+		ulint age_ms = now_ms - (ulint) bpage->access_time;
+		if (age_ms < (ulint) HYBRID_RECENT_MS) {
+			score -= 40;	/* first access very recent */
+		} else if (age_ms < 10000) {
+			/* neutral */
+		} else {
+			score += 20;	/* first accessed long ago = cooled */
+		}
+	}
+
+	return score;
+}
+
+/******************************************************************//**
+Scan up to scan_limit pages from the LRU tail and return the clean page
+with the highest hybrid eviction score.
+Called with buf_pool->mutex held.
+@return best victim page (always clean), or NULL if none qualifies */
+UNIV_INTERN
+buf_page_t*
+buf_LRU_find_hybrid_victim(
+/*=======================*/
+	buf_pool_t*	buf_pool,	/*!< in/out: buffer pool instance */
+	ulint		scan_limit)	/*!< in: max pages to scan */
+{
+	ut_ad(buf_pool_mutex_own(buf_pool));
+
+	buf_page_t*	best		= NULL;
+	lint		best_score	= LONG_MIN;
+	ulint		scanned		= 0;
+	ulint		now_ms		= (ulint) ut_time_ms();
+
+	for (buf_page_t* bpage = UT_LIST_GET_LAST(buf_pool->LRU);
+	     bpage != NULL && scanned < scan_limit;
+	     bpage = UT_LIST_GET_PREV(LRU, bpage), ++scanned) {
+
+		buf_pool->hybrid_candidates_scanned++;
+
+		/* Don't cross into the hot/young section */
+		if (bpage == buf_pool->LRU_old) {
+			break;
+		}
+
+		if (!buf_page_in_file(bpage)) {
+			continue;
+		}
+
+		/* Skip pages that are pinned or mid-I/O */
+		if (bpage->buf_fix_count > 0
+		    || buf_page_get_io_fix(bpage) != BUF_IO_NONE
+		    || (bpage->LRU_batch_write_victim
+			&& !bpage->aio_write_finished)) {
+			continue;
+		}
+
+		lint score = buf_hybrid_page_score(bpage, now_ms);
+
+		/* Track hot clean pages we choose to protect */
+		if (bpage->oldest_modification == 0 && score < 50) {
+			buf_pool->hybrid_hot_clean_pages_protected++;
+		}
+
+		/* Only evict clean pages; dirty pages are scheduled for
+		   background flush by buf_flush_LRU_tail() */
+		if (bpage->oldest_modification != 0) {
+			continue;
+		}
+
+		if (score > best_score) {
+			best_score = score;
+			best	   = bpage;
+		}
+	}
+
+	return best;
+}
+/* end lbh */
+
 UNIV_INTERN
 buf_block_t*
 buf_LRU_get_free_block(
@@ -1411,36 +1530,49 @@ loop:
 	}
 
 	
-	/* lbh */
+	/* lbh: hybrid + LRU-C victim selection */
 	buf_page_t* bpage = NULL;
 
+	/* Step 1: try hybrid window scan — picks clean, cold, infrequently
+	   accessed page from the last HYBRID_SCAN_WINDOW entries of the LRU. */
+	bpage = buf_LRU_find_hybrid_victim(buf_pool, HYBRID_SCAN_WINDOW);
+	if (bpage != NULL) {
+		freed = buf_LRU_free_page(bpage, false);
+		if (freed) {
+			buf_pool->hybrid_clean_victims_selected++;
+			buf_pool_mutex_exit(buf_pool);
+			goto loop;
+		}
+		/* buf_LRU_free_page() returned false (page became
+		   ineligible between scoring and freeing); fall through to
+		   the LRU-C path. */
+		buf_pool->hybrid_fallback_to_lruc++;
+	} else {
+		buf_pool->hybrid_no_candidate_found++;
+	}
+
+	/* Step 2: original LRU-C path — use cached LRU_oldest_clean_page. */
+	bpage = NULL;
 	if(buf_oldest_clean_page_is_valid(buf_pool)){
-		//fprintf(stderr, "skip lru scan\n");
 		bpage = buf_pool->LRU_oldest_clean_page;
 		freed = buf_LRU_free_page(bpage, false);
-				
 	}else{
-		//fprintf(stderr, "try update ocp\n");
 		if(buf_update_oldest_clean_page(buf_pool, false)){
 			bpage = buf_pool->LRU_oldest_clean_page;
-			freed = buf_LRU_free_page(bpage, false);	
+			freed = buf_LRU_free_page(bpage, false);
 		}else{
-			buf_pool_mutex_exit(buf_pool);					
+			buf_pool_mutex_exit(buf_pool);
 			if(buf_update_oldest_clean_page(buf_pool, true)){
-				buf_pool_mutex_enter(buf_pool);	
-				//fprintf(stderr, "try lru scan\n");
+				buf_pool_mutex_enter(buf_pool);
 				bpage = buf_pool->LRU_oldest_clean_page;
-				freed = buf_LRU_free_page(bpage, false);	
+				freed = buf_LRU_free_page(bpage, false);
 			}else{
-				buf_pool_mutex_enter(buf_pool);	
+				buf_pool_mutex_enter(buf_pool);
 				freed= FALSE;
 			}
-							
 		}
-			
 	}
 	if(freed){
-		//fprintf(stderr, "get free block via oldest clean page succeed: old: %lu, bpage:%lu\n", buf_pool->LRU_oldest_clean_page, bpage);		
 		buf_pool_mutex_exit(buf_pool);
 		goto loop;
 	}

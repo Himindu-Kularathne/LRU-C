@@ -2427,13 +2427,12 @@ buf_flush_LRU_tail(void)
 				break;
 			}
 
-			evict = buf_flush_ready_for_replace(bpage);			
-		
+			evict = buf_flush_ready_for_replace(bpage);
+
 			++scanned;
 			prev_bpage = UT_LIST_GET_PREV(LRU, bpage);
 
 			if(evict){
-				//fprintf(stderr, "clean page in LRU tail\n");
 				n_clean_page++;
 				mutex_exit(block_mutex);
 
@@ -2446,11 +2445,10 @@ buf_flush_LRU_tail(void)
 						buf_LRU_dirty_tail_list_mutex_enter(buf_pool);
 						bpage->LRU_batch_write_victim = true;
 						bpage->aio_write_finished = false;
-						//fprintf(stderr, "dirty page flush in LRU tail, bpage:%lu\n",bpage);
 						total_flushed++;
+						buf_pool->hybrid_dirty_pages_flushed++;
 						/* block_mutex already released by buf_flush_page */
 					} else {
-						//fprintf(stderr, "dirty page flush in LRU tail failed:  bpage:%lu\n",bpage);
 						mutex_exit(block_mutex);
 					}
 				} else {

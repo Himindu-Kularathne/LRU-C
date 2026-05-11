@@ -1440,6 +1440,23 @@ buf_pool_free_instance(
 	   before buf_pool_free() in innobase_shutdown_for_mysql(); freeing
 	   them here would double-free and corrupt the os_event_list. */
 
+	/* lbh: print hybrid eviction counters at shutdown */
+	fprintf(stderr,
+		"InnoDB: Hybrid LRU-C stats (pool %lu):"
+		" candidates_scanned=%lu"
+		" clean_victims=%lu"
+		" dirty_flushed=%lu"
+		" hot_clean_protected=%lu"
+		" fallback_to_lruc=%lu"
+		" no_candidate=%lu\n",
+		buf_pool->instance_no,
+		buf_pool->hybrid_candidates_scanned,
+		buf_pool->hybrid_clean_victims_selected,
+		buf_pool->hybrid_dirty_pages_flushed,
+		buf_pool->hybrid_hot_clean_pages_protected,
+		buf_pool->hybrid_fallback_to_lruc,
+		buf_pool->hybrid_no_candidate_found);
+	/* end */
 }
 
 /********************************************************************//**
