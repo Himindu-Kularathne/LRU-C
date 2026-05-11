@@ -2391,20 +2391,23 @@ buf_flush_LRU_tail(void)
 		   && bpage!=NULL) {
 			buf_LRU_dirty_tail_list_mutex_enter(buf_pool);
 
-			if(!buf_page_in_file(bpage)){				
+			if(!buf_page_in_file(bpage)){
 				//fprintf(stderr, "not in file page: %lu\n",count);
+				buf_LRU_dirty_tail_list_mutex_exit(buf_pool);
 				break;
 			}
-	
+
 			if(bpage==buf_pool->LRU_old){
 				buf_pool->reached_LRU_oldest_clean_page=true;
 				//fprintf(stderr, "reached LRU_old buf_pool: %lu, count: %lu\n", buf_pool, count);
+				buf_LRU_dirty_tail_list_mutex_exit(buf_pool);
 				break;
-		
+
 			}
 			if((bpage==buf_pool->LRU_oldest_clean_page && buf_pool->LRU_oldest_clean_page!=NULL)){
 				buf_pool->reached_LRU_oldest_clean_page=true;
 				//fprintf(stderr, "buf_pool->reached_LRU_oldest_clean_page: %lu, buf_pool: %lu, count: %lu\n", buf_pool->reached_LRU_oldest_clean_page, buf_pool, count);
+				buf_LRU_dirty_tail_list_mutex_exit(buf_pool);
 				break;
 			}
 
@@ -2414,9 +2417,10 @@ buf_flush_LRU_tail(void)
 
 			mutex_enter(block_mutex);
 
-			if(!buf_page_in_file(bpage)){				
+			if(!buf_page_in_file(bpage)){
 				mutex_exit(block_mutex);
 				fprintf(stderr, "not in file page: %lu\n",count);
+				buf_LRU_dirty_tail_list_mutex_exit(buf_pool);
 				break;
 			}
 
@@ -2425,37 +2429,42 @@ buf_flush_LRU_tail(void)
 			++scanned;
 			prev_bpage = UT_LIST_GET_PREV(LRU, bpage);
 
-			if(evict){				
+			if(evict){
 				//fprintf(stderr, "clean page in LRU tail\n");
 				n_clean_page++;
-				mutex_exit(block_mutex);					
+				mutex_exit(block_mutex);
 
 			}else{
-				if(buf_flush_ready_for_flush(bpage, BUF_FLUSH_LRU)){					
+				if(buf_flush_ready_for_flush(bpage, BUF_FLUSH_LRU)){
 					if (buf_flush_page(buf_pool, bpage, BUF_FLUSH_LRU, false)) {
+						/* buf_flush_page released both block_mutex and
+						   buf_LRU_dirty_tail_list_mutex internally; re-acquire
+						   the tail mutex to update victim bookkeeping. */
 						buf_LRU_dirty_tail_list_mutex_enter(buf_pool);
 						bpage->LRU_batch_write_victim = true;
 						bpage->aio_write_finished = false;
 						//fprintf(stderr, "dirty page flush in LRU tail, bpage:%lu\n",bpage);
 						total_flushed++;
-								
+						/* block_mutex already released by buf_flush_page */
 					} else {
 						//fprintf(stderr, "dirty page flush in LRU tail failed:  bpage:%lu\n",bpage);
-						mutex_exit(block_mutex);						
+						mutex_exit(block_mutex);
 					}
-							
+				} else {
+					/* Page not ready for flush: release block_mutex. */
+					mutex_exit(block_mutex);
 				}
-				mutex_exit(block_mutex);			
 			}
 			bpage = prev_bpage;
-			buf_LRU_dirty_tail_list_mutex_exit(buf_pool);							            				
+			buf_LRU_dirty_tail_list_mutex_exit(buf_pool);
 		}
+		/* All breaks above release buf_LRU_dirty_tail_list_mutex before
+		   breaking; normal loop exit releases it on the last iteration at
+		   the line above.  Do NOT call mutex_exit here. */
 		buf_dblwr_flush_buffered_writes();
-		//fprintf(stderr,"total flush: %lu\n",total_flushed);		
+		//fprintf(stderr,"total flush: %lu\n",total_flushed);
 		buf_pool->flush_running = false;
-        os_event_set(buf_pool->f_event);
-		
-		buf_LRU_dirty_tail_list_mutex_exit(buf_pool);							
+		os_event_set(buf_pool->f_event);							
 
 
 		/* end */

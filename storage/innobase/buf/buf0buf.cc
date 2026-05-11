@@ -1436,10 +1436,9 @@ buf_pool_free_instance(
 	hash_table_free(buf_pool->page_hash);
 	hash_table_free(buf_pool->zip_hash);
 
-	/* lbh */
-	// FOR LRU-C 
-	os_event_free(buf_pool->b_event);
-	os_event_free(buf_pool->f_event);
+	/* b_event and f_event are freed by os_sync_free() which runs
+	   before buf_pool_free() in innobase_shutdown_for_mysql(); freeing
+	   them here would double-free and corrupt the os_event_list. */
 
 }
 
