@@ -18,6 +18,12 @@ Modified parts in files are marked with ```For LRU-C``` with comments in the sou
 - ```buf0lru.h```
 - ```buf0buf.h```
 
+## Local documentation
+I added practical Markdown notes for understanding and running this tree:
+- [Project guide](Docs/PROJECT_GUIDE.md)
+- [How to build and run](Docs/RUNNING.md)
+- [LRU-C internals](Docs/INTERNALS.md)
+
 ## How to run TPC-C@MySQL with LRU-C
 
 1. Download the LRU-C source code and unzip the file.

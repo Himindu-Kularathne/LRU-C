@@ -1791,10 +1791,8 @@ buf_do_flush_list_batch(
 			bpage = UT_LIST_GET_LAST(buf_pool->flush_list);
 			len = UT_LIST_GET_LEN(buf_pool->flush_list);
 		} else {
-			if(flush){
-				bpage = prev;
-				--len;				
-			}
+			bpage = prev;
+			--len;
 			buf_flush_set_hp(buf_pool, NULL);			
 		}
 
@@ -2027,13 +2025,33 @@ buf_flush_wait_batch_end(
 	if (buf_pool == NULL) {
 		ulint	i;
 
-		for (i = 0; i < srv_buf_pool_instances; ++i) {
-			buf_pool_t*	buf_pool;
+			for (i = 0; i < srv_buf_pool_instances; ++i) {
+				buf_pool_t*	buf_pool;
+				bool		should_wait;
 
-			buf_pool = buf_pool_from_array(i);
-			if (type==BUF_FLUSH_LRU) {
+				buf_pool = buf_pool_from_array(i);
+				if (type == BUF_FLUSH_LRU) {
+					buf_LRU_dirty_tail_list_mutex_enter(buf_pool);
+				} else {
+					buf_pool_mutex_enter(buf_pool);
+				}
 
-					thd_wait_begin(NULL, THD_WAIT_DISKIO);
+				should_wait = buf_pool->n_flush[type] > 0
+					|| buf_pool->init_flush[type];
+
+				if (type == BUF_FLUSH_LRU) {
+					buf_LRU_dirty_tail_list_mutex_exit(buf_pool);
+				} else {
+					buf_pool_mutex_exit(buf_pool);
+				}
+
+				if (!should_wait) {
+					continue;
+				}
+
+				if (type==BUF_FLUSH_LRU) {
+
+						thd_wait_begin(NULL, THD_WAIT_DISKIO);
 					os_event_wait(buf_pool->no_flush[type]);
 					//fprintf(stderr, "buf_flush_wait_batch_end() os_event_reset()\n");				
 					thd_wait_end(NULL);
@@ -2047,11 +2065,32 @@ buf_flush_wait_batch_end(
 	
 			
 			}
-		}
-	} else {
-		if(type==BUF_FLUSH_LRU){
+			}
+		} else {
+			bool	should_wait;
 
-			thd_wait_begin(NULL, THD_WAIT_DISKIO);
+			if (type == BUF_FLUSH_LRU) {
+				buf_LRU_dirty_tail_list_mutex_enter(buf_pool);
+			} else {
+				buf_pool_mutex_enter(buf_pool);
+			}
+
+			should_wait = buf_pool->n_flush[type] > 0
+				|| buf_pool->init_flush[type];
+
+			if (type == BUF_FLUSH_LRU) {
+				buf_LRU_dirty_tail_list_mutex_exit(buf_pool);
+			} else {
+				buf_pool_mutex_exit(buf_pool);
+			}
+
+			if (!should_wait) {
+				return;
+			}
+
+			if(type==BUF_FLUSH_LRU){
+
+				thd_wait_begin(NULL, THD_WAIT_DISKIO);
 			os_event_wait(buf_pool->no_flush[type]);
 			//fprintf(stderr, "buf_flush_wait_batch_end() os_event_reset()\n");				
 			thd_wait_end(NULL);
@@ -2322,8 +2361,8 @@ buf_flush_LRU_tail(void)
 		/* lbh */
 		// FOR LRU-C 
 
-		buf_LRU_dirty_tail_list_mutex_enter(buf_pool);
-		scan_depth = ut_min(srv_LRU_scan_depth, scan_depth);
+			buf_LRU_dirty_tail_list_mutex_enter(buf_pool);
+			scan_depth = srv_LRU_scan_depth;
 
 		ulint free_len=  UT_LIST_GET_LEN(buf_pool->free);
 		ulint lru_len=  UT_LIST_GET_LEN(buf_pool->LRU);
@@ -2733,17 +2772,17 @@ DECLARE_THREAD(buf_flush_page_cleaner_thread)(
 
 			/* Flush pages from end of LRU if required */
 			n_flushed = buf_flush_LRU_tail();
-			fprintf(stderr, "1pct: n_flushed: %lu\n", n_flushed);
+				fprintf(stderr, "1pct: n_flushed: %lu\n", n_flushed);
 
-			/* Flush pages from flush_list if required */
-			//n_flushed += page_cleaner_flush_pages_if_needed();
-			fprintf(stderr, "2pct: n_flushed: %lu\n", n_flushed);
+				/* Flush pages from flush_list if required */
+				n_flushed += page_cleaner_flush_pages_if_needed();
+				fprintf(stderr, "2pct: n_flushed: %lu\n", n_flushed);
 
 			
-		} else {
-			//n_flushed = page_cleaner_do_flush_batch(
-							//PCT_IO(100),
-						//	LSN_MAX);
+			} else {
+				n_flushed = page_cleaner_do_flush_batch(
+							PCT_IO(100),
+							LSN_MAX);
 
 			if (n_flushed) {
 				MONITOR_INC_VALUE_CUMULATIVE(
@@ -2774,11 +2813,11 @@ DECLARE_THREAD(buf_flush_page_cleaner_thread)(
 	the buffer pool but can't be sure that no new pages are being
 	dirtied until we enter SRV_SHUTDOWN_FLUSH_PHASE phase. */
 
-	do {
-		//n_flushed = page_cleaner_do_flush_batch(PCT_IO(100), LSN_MAX);
+		do {
+			n_flushed = page_cleaner_do_flush_batch(PCT_IO(100), LSN_MAX);
 
-		/* We sleep only if there are no pages to flush */
-		if (n_flushed == 0) {
+			/* We sleep only if there are no pages to flush */
+			if (n_flushed == 0) {
 			os_thread_sleep(100000);
 		}
 	} while (srv_shutdown_state == SRV_SHUTDOWN_CLEANUP);
@@ -2801,12 +2840,12 @@ DECLARE_THREAD(buf_flush_page_cleaner_thread)(
 
 	bool	success;
 
-	do {
+		do {
 
-		//success = buf_flush_list(PCT_IO(100), LSN_MAX, &n_flushed);
-		//buf_flush_wait_batch_end(NULL, BUF_FLUSH_LIST);
+			success = buf_flush_list(PCT_IO(100), LSN_MAX, &n_flushed);
+			buf_flush_wait_batch_end(NULL, BUF_FLUSH_LIST);
 
-	} while (!success || n_flushed > 0);
+		} while (!success || n_flushed > 0);
 
 	/* Some sanity checks */
 	ut_a(srv_get_active_thread_type() == SRV_NONE);
