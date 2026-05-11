@@ -600,21 +600,19 @@ buf_flush_remove(
 		ut_error;
 		return;
 	case BUF_BLOCK_ZIP_DIRTY:
-	if (!bpage->LRU_batch_write_victim || (bpage->LRU_batch_write_victim && !bpage->aio_write_finished)) {
-           buf_page_set_state(bpage, BUF_BLOCK_ZIP_PAGE);
-			UT_LIST_REMOVE(list, buf_pool->flush_list, bpage);
-			bpage->LRU_batch_write_victim = false;
-        }
+		buf_page_set_state(bpage, BUF_BLOCK_ZIP_PAGE);
+		UT_LIST_REMOVE(list, buf_pool->flush_list, bpage);
+		bpage->LRU_batch_write_victim = false;
+		bpage->aio_write_finished = false;
 
 #if defined UNIV_DEBUG || defined UNIV_BUF_DEBUG
 		buf_LRU_insert_zip_clean(bpage);
 #endif /* UNIV_DEBUG || UNIV_BUF_DEBUG */
 		break;
 	case BUF_BLOCK_FILE_PAGE:
-		if (!bpage->LRU_batch_write_victim || (bpage->LRU_batch_write_victim && !bpage->aio_write_finished)) {
-            UT_LIST_REMOVE(list, buf_pool->flush_list, bpage);
-			bpage->LRU_batch_write_victim = false;
-        }
+		UT_LIST_REMOVE(list, buf_pool->flush_list, bpage);
+		bpage->LRU_batch_write_victim = false;
+		bpage->aio_write_finished = false;
 		break;
 	}
 
@@ -754,9 +752,10 @@ buf_flush_write_complete(
 			//fprintf(stderr, "1bpage: %lu, batch ended %lu\n", bpage);
 			os_event_set(buf_pool->b_event);
 	
-		}else{
-			fprintf(stderr, "2bpage: %lu, batch ended: %lu\n", bpage );
-		}
+			}else{
+				fprintf(stderr, "flush-list batch ended, bpage: %p\n",
+					(void*) bpage);
+			}
 
 		os_event_set(buf_pool->no_flush[flush_type]);
 		
@@ -1755,12 +1754,16 @@ buf_do_flush_list_batch(
 	
 
 		if(bpage->LRU_batch_write_victim){
-			fprintf(stderr, "buf_do_flush_list_batch() bpage: %lu, aiowrite not finished\n", bpage);
+			fprintf(stderr,
+				"buf_do_flush_list_batch() skip LRU-C victim, bpage: %p\n",
+				(void*) bpage);
 			flush=false;
 
 		}
 		if(bpage==buf_pool->LRU_oldest_clean_page){
-			fprintf(stderr, "buf_do_flush_list_batch() bpage: %lu, aiowrite not finished\n", bpage);
+			fprintf(stderr,
+				"buf_do_flush_list_batch() skip LRU-C oldest clean page, bpage: %p\n",
+				(void*) bpage);
 			flush=false;
 		}
 		
