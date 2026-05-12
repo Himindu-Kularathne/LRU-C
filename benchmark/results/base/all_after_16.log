@@ -1,0 +1,124 @@
++---------------------------------------+-------------+
+| Variable_name                         | Value       |
++---------------------------------------+-------------+
+| Innodb_buffer_pool_dump_status        | not started |
+| Innodb_buffer_pool_load_status        | not started |
+| Innodb_buffer_pool_pages_data         | 7697        |
+| Innodb_buffer_pool_bytes_data         | 126107648   |
+| Innodb_buffer_pool_pages_dirty        | 0           |
+| Innodb_buffer_pool_bytes_dirty        | 0           |
+| Innodb_buffer_pool_pages_flushed      | 419460      |
+| Innodb_buffer_pool_pages_free         | 0           |
+| Innodb_buffer_pool_pages_misc         | 494         |
+| Innodb_buffer_pool_pages_total        | 8191        |
+| Innodb_buffer_pool_read_ahead_rnd     | 0           |
+| Innodb_buffer_pool_read_ahead         | 18          |
+| Innodb_buffer_pool_read_ahead_evicted | 0           |
+| Innodb_buffer_pool_read_requests      | 482314663   |
+| Innodb_buffer_pool_reads              | 407474      |
+| Innodb_buffer_pool_wait_free          | 0           |
+| Innodb_buffer_pool_write_requests     | 29092210    |
++---------------------------------------+-------------+
+17 rows in set (0.00 sec)
+
+mysql> SHOW ENGINE INNODB STATUS\G
+*************************** 1. row ***************************
+  Type: InnoDB
+  Name: 
+Status: 
+=====================================
+2026-05-11 23:51:47 78c9a73d66c0 INNODB MONITOR OUTPUT
+=====================================
+Per second averages calculated from the last 58 seconds
+-----------------
+BACKGROUND THREAD
+-----------------
+srv_master_thread loops: 619 srv_active, 0 srv_shutdown, 1363 srv_idle
+srv_master_thread log flush and writes: 1982
+----------
+SEMAPHORES
+----------
+OS WAIT ARRAY INFO: reservation count 136904
+OS WAIT ARRAY INFO: signal count 1219161
+Mutex spin waits 1969218, rounds 10804209, OS waits 61180
+RW-shared spins 1324221, rounds 5392941, OS waits 46116
+RW-excl spins 163104, rounds 3159662, OS waits 26076
+Spin rounds per wait: 5.49 mutex, 4.07 RW-shared, 19.37 RW-excl
+------------
+TRANSACTIONS
+------------
+Trx id counter 4724768
+Purge done for trx's n:o < 4724768 undo n:o < 0 state: running but idle
+History list length 819
+LIST OF TRANSACTIONS FOR EACH SESSION:
+---TRANSACTION 0, not started
+MySQL thread id 49, OS thread handle 0x78c9a73d66c0, query id 62650326 localhost root init
+SHOW ENGINE INNODB STATUS
+--------
+FILE I/O
+--------
+I/O thread 0 state: waiting for i/o request (insert buffer thread)
+I/O thread 1 state: waiting for i/o request (log thread)
+I/O thread 2 state: waiting for i/o request (read thread)
+I/O thread 3 state: waiting for i/o request (read thread)
+I/O thread 4 state: waiting for i/o request (read thread)
+I/O thread 5 state: waiting for i/o request (read thread)
+I/O thread 6 state: waiting for i/o request (write thread)
+I/O thread 7 state: waiting for i/o request (write thread)
+I/O thread 8 state: waiting for i/o request (write thread)
+I/O thread 9 state: waiting for i/o request (write thread)
+Pending normal aio reads: 0 [0, 0, 0, 0] , aio writes: 0 [0, 0, 0, 0] ,
+ ibuf aio reads: 0, log i/o's: 0, sync i/o's: 0
+Pending flushes (fsync) log: 0; buffer pool: 0
+407714 OS file reads, 375200 OS file writes, 314612 OS fsyncs
+0.62 reads/s, 16384 avg bytes/read, 0.66 writes/s, 0.41 fsyncs/s
+-------------------------------------
+INSERT BUFFER AND ADAPTIVE HASH INDEX
+-------------------------------------
+Ibuf: size 1, free list len 0, seg size 2, 279 merges
+merged operations:
+ insert 48, delete mark 274, delete 22
+discarded operations:
+ insert 0, delete mark 0, delete 0
+Hash table size 276671, node heap has 494 buffer(s)
+1.21 hash searches/s, 0.03 non-hash searches/s
+---
+LOG
+---
+Log sequence number 2572927885
+Log flushed up to   2572927885
+Pages flushed up to 2572927885
+Last checkpoint at  2572927885
+0 pending log writes, 0 pending chkp writes
+275548 log i/o's done, 0.17 log i/o's/second
+----------------------
+BUFFER POOL AND MEMORY
+----------------------
+Total memory allocated 137625600; in additional pool allocated 0
+Dictionary memory allocated 105801
+Buffer pool size   8191
+Free buffers       0
+Database pages     7697
+Old database pages 2821
+Modified db pages  0
+Pending reads 0
+Pending writes: LRU 0, flush list 0, single page 0
+Pages made young 2278417, not young 24681655
+0.40 youngs/s, 0.62 non-youngs/s
+Pages read 407698, created 26691, written 446503
+0.62 reads/s, 0.00 creates/s, 0.45 writes/s
+Buffer pool hit rate 986 / 1000, young-making rate 9 / 1000 not 14 / 1000
+Pages read ahead 0.00/s, evicted without access 0.00/s, Random read ahead 0.00/s
+LRU len: 7697, unzip_LRU len: 0
+I/O sum[43]:cur[0], unzip sum[0]:cur[0]
+--------------
+ROW OPERATIONS
+--------------
+0 queries inside InnoDB, 0 queries in queue
+0 read views open inside InnoDB
+Main thread process no. 187522, id 132807485830848, state: sleeping
+Number of rows inserted 2073578, updated 2147156, deleted 1073578, read 1513013983
+0.00 inserts/s, 0.00 updates/s, 0.00 deletes/s, 0.00 reads/s
+----------------------------
+END OF INNODB MONITOR OUTPUT
+============================

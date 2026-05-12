@@ -1,0 +1,6 @@
+Variable_name	Value
+Innodb_buffer_pool_read_ahead_rnd	0
+Innodb_buffer_pool_read_ahead	16
+Innodb_buffer_pool_read_ahead_evicted	0
+Innodb_buffer_pool_read_requests	285906154
+Innodb_buffer_pool_reads	278414
